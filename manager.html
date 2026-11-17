@@ -32,6 +32,11 @@
   .entry .d { color:var(--muted); min-width:84px; }
   .entry .t { min-width:110px; }
   .muted { color:var(--muted); font-size:14px; }
+  .day { display:flex; gap:10px; padding:8px 0 0; border-top:1px dashed var(--line); margin-top:8px; }
+  .day:first-of-type { border-top:0; }
+  .day .dd { min-width:84px; color:var(--muted); font-size:14px; padding-top:1px; }
+  .day .dc { flex:1; }
+  .planline { font-size:14px; color:#35507f; background:#eef3ff; border-radius:8px; padding:4px 8px; display:inline-block; margin-bottom:2px; }
   .sum { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
   .sum span { font-size:14px; padding:4px 10px; border-radius:999px; background:#eef1f8; }
   #err { color:#8a1c12; margin-top:8px; font-size:14px; }
@@ -59,6 +64,8 @@
         <button class="ghost" id="qToday">Сегодня</button>
         <button class="ghost" id="qYest">Вчера</button>
         <button class="ghost" id="qWeek">Последние 7 дней</button>
+        <button class="ghost" id="qTomorrow">Завтра</button>
+        <button class="ghost" id="qAhead">Неделя вперёд</button>
         <button class="ghost" id="qRefresh">Обновить</button>
       </div>
       <details>
@@ -83,6 +90,29 @@
 const API = 'https://script.google.com/macros/s/AKfycbzp-51TwuOQ9guV90uDErXS_d_nx3ofcDWjdFJoQnTFrWd-W-m8x2eX7v4CyPuyFWkuKg/exec';
 
 const $ = id => document.getElementById(id);
+
+// --- разбор записи из графика ---
+function parsePlan(t) {
+  const lines = String(t || '').split('\n').map(s => s.trim()).filter(Boolean);
+  let remote = false; const places = [], status = [];
+  lines.forEach(l => {
+    if (/дистант/i.test(l)) remote = true;
+    const rest = l.replace(/дистант/ig, '').trim();
+    if (!rest) return;
+    if (/^(отпуск|больничный)/i.test(rest)) status.push(rest); else places.push(rest);
+  });
+  return { remote, places, status };
+}
+function planText(t) {
+  const p = parsePlan(t);
+  const parts = [];
+  if (p.status.length) parts.push(p.status.join(', ') + (p.remote ? ' (дистант)' : ''));
+  else if (p.places.length) parts.push((p.remote ? 'дистант, проверяет: ' : '') + p.places.join(' + '));
+  else if (p.remote) parts.push('дистант');
+  return parts.join('') || '—';
+}
+const dayLabel = ds => new Date(ds + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'numeric' });
+
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let pin = localStorage.getItem('mg_pin') || '';
 let data = null;
@@ -150,21 +180,29 @@ function render() {
   const html = emps.map(n => {
     const list = data.rows.filter(r => r.employee === n)
       .sort((a, b) => (a.date + a.in).localeCompare(b.date + b.in));
+    const plan = (data.plan || {})[n] || {};
     const last = list[list.length - 1];
     const open = last && !last.out && last.date === data.today;
     if (!last) nNone++; else if (open) (last.format === 'Дистанционно' ? nRem++ : nOn++);
-    const entries = list.length ? list.map(e => `
-      <div class="entry">
-        ${multiDay ? `<span class="d">${ru(e.date)}</span>` : ''}
-        <span class="t">${esc(e.in)} – ${esc(e.out || '…')}${e.dur ? ' (' + esc(e.dur) + ')' : ''}</span>
-        <span>${where(e)}${e.note ? ' <span class="muted">· ' + esc(e.note) + '</span>' : ''}</span>
-      </div>`).join('') : '<div class="muted" style="padding-top:6px">За выбранный период отметок нет</div>';
-    return `<div class="person"><div class="head"><span class="name">${esc(n)}</span>${badge(last, data.today)}</div>${entries}</div>`;
+
+    const dates = [...new Set([...list.map(e => e.date), ...Object.keys(plan)])].sort();
+    const days = dates.map(d => {
+      const facts = list.filter(e => e.date === d);
+      const planHtml = plan[d] ? `<div class="planline">по графику: ${esc(planText(plan[d]))}</div>` : '';
+      const factHtml = facts.length ? facts.map(e => `
+        <div class="entry" style="padding-top:2px">
+          <span class="t">${esc(e.in)} – ${esc(e.out || '…')}${e.dur ? ' (' + esc(e.dur) + ')' : ''}</span>
+          <span>${where(e)}${e.note ? ' <span class="muted">· ' + esc(e.note) + '</span>' : ''}</span>
+        </div>`).join('') : (d <= data.today ? '<div class="muted">отметок нет</div>' : '');
+      return `<div class="day"><span class="dd">${multiDay || dates.length > 1 ? dayLabel(d) : ''}</span><div class="dc">${planHtml}${factHtml}</div></div>`;
+    }).join('') || '<div class="muted" style="padding-top:6px">За выбранный период данных нет</div>';
+    return `<div class="person"><div class="head"><span class="name">${esc(n)}</span>${badge(last, data.today)}</div>${days}</div>`;
   }).join('');
 
+  const note = data.planFound ? '' : '<span>график не найден в таблице</span>';
   $('sum').innerHTML =
     `<span>${ru(data.from)}${multiDay ? ' – ' + ru(data.to) : ''}</span>` +
-    `<span>на объекте сейчас: ${nOn}</span><span>дистант сейчас: ${nRem}</span><span>без отметок: ${nNone}</span>`;
+    `<span>на объекте сейчас: ${nOn}</span><span>дистант сейчас: ${nRem}</span><span>без отметок: ${nNone}</span>` + note;
   $('result').innerHTML = html || '<p class="muted">Выберите сотрудников.</p>';
 }
 
@@ -173,6 +211,8 @@ $('pinBtn').onclick = () => { pin = $('pin').value.trim(); load(); };
 $('qToday').onclick = () => { const d = new Date(); setRange(d, d); };
 $('qYest').onclick = () => { const d = new Date(); d.setDate(d.getDate() - 1); setRange(d, d); };
 $('qWeek').onclick = () => { const d = new Date(), a = new Date(); a.setDate(a.getDate() - 6); setRange(a, d); };
+$('qTomorrow').onclick = () => { const d = new Date(); d.setDate(d.getDate() + 1); setRange(d, d); };
+$('qAhead').onclick = () => { const d = new Date(), b = new Date(); b.setDate(b.getDate() + 6); setRange(d, b); };
 $('qRefresh').onclick = () => load();
 $('from').onchange = $('to').onchange = () => load();
 $('allOn').onclick = () => { selected = new Set(data.employees); saveSel(); renderEmps(); render(); };

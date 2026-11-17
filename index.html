@@ -29,6 +29,10 @@
   .seg input { display:none; }
   .seg label { flex:1; margin:0; padding:11px 8px; text-align:center; font-size:15px; color:var(--ink); cursor:pointer; background:#fff; }
   .seg input:checked + label { background:var(--accent); color:#fff; font-weight:600; }
+  .plan { background:#eef3ff; border:1px solid #cfdcff; border-radius:10px; padding:10px 12px; margin-top:12px; font-size:14px; }
+  .plan summary { font-weight:500; }
+  .plan .pl { display:flex; gap:10px; padding:3px 0; }
+  .plan .pd { min-width:84px; color:var(--muted); }
   details summary { cursor:pointer; font-weight:600; }
   .link { background:none; color:var(--accent); width:auto; padding:0; font-weight:500; font-size:14px; }
 </style>
@@ -48,6 +52,8 @@
     <div class="card">
       <label for="emp">Сотрудник</label>
       <select id="emp"></select>
+
+      <div id="planBox" class="plan" style="display:none"></div>
 
       <label>Формат работы</label>
       <div class="seg">
@@ -98,7 +104,31 @@
 const API = 'https://script.google.com/macros/s/AKfycbzp-51TwuOQ9guV90uDErXS_d_nx3ofcDWjdFJoQnTFrWd-W-m8x2eX7v4CyPuyFWkuKg/exec';
 
 const $ = id => document.getElementById(id);
+
+// --- разбор записи из графика ---
+function parsePlan(t) {
+  const lines = String(t || '').split('\n').map(s => s.trim()).filter(Boolean);
+  let remote = false; const places = [], status = [];
+  lines.forEach(l => {
+    if (/дистант/i.test(l)) remote = true;
+    const rest = l.replace(/дистант/ig, '').trim();
+    if (!rest) return;
+    if (/^(отпуск|больничный)/i.test(rest)) status.push(rest); else places.push(rest);
+  });
+  return { remote, places, status };
+}
+function planText(t) {
+  const p = parsePlan(t);
+  const parts = [];
+  if (p.status.length) parts.push(p.status.join(', ') + (p.remote ? ' (дистант)' : ''));
+  else if (p.places.length) parts.push((p.remote ? 'дистант, проверяет: ' : '') + p.places.join(' + '));
+  else if (p.remote) parts.push('дистант');
+  return parts.join('') || '—';
+}
+const dayLabel = ds => new Date(ds + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'numeric' });
+
 let pin = localStorage.getItem('st_pin') || '';
+let lastData = null, userEdited = false;
 
 function msg(text, ok) { const s = $('status'); s.textContent = text; s.className = 'status ' + (ok ? 'ok' : 'err'); }
 
@@ -123,6 +153,8 @@ function render(d) {
       }).join('')
     : '<p class="muted">Сейчас никто не отмечен.</p>';
   if (!$('bDate').value) $('bDate').value = d.today;
+  lastData = d;
+  renderPlan();
 }
 
 async function start() {
@@ -154,6 +186,29 @@ async function act(payload, btn) {
 }
 const fmt = () => document.querySelector('input[name=fmt]:checked').value;
 const base = () => ({ employee: $('emp').value, format: fmt(), place: $('place').value, note: $('note').value });
+function renderPlan() {
+  const box = $('planBox');
+  if (!lastData || !lastData.planFound) { box.style.display = 'none'; return; }
+  const mine = (lastData.plan || {})[$('emp').value] || {};
+  const days = Object.keys(mine).sort();
+  const today = lastData.today;
+  const todayTxt = mine[today] ? planText(mine[today]) : 'в графике не указано';
+  const rest = days.filter(d => d !== today);
+  box.style.display = 'block';
+  box.innerHTML = `<div><b>По графику сегодня:</b> ${esc(todayTxt)}</div>` + (rest.length
+    ? `<details style="margin-top:6px"><summary>Ближайшие дни</summary>${rest.map(d =>
+        `<div class="pl"><span class="pd">${dayLabel(d)}</span><span>${esc(planText(mine[d]))}</span></div>`).join('')}</details>` : '');
+  if (!userEdited && mine[today]) {
+    const p = parsePlan(mine[today]);
+    if (!p.status.length && p.places.length <= 1 && (p.places.length || p.remote)) {
+      (p.remote ? $('fmtOff') : $('fmtOn')).checked = true;
+      $('place').value = p.places[0] || '';
+      syncFmt();
+    }
+  }
+}
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 function syncFmt() {
   const remote = fmt() === 'Дистанционно';
   $('placeLbl').textContent = remote ? 'Проверяемое учреждение (если есть)' : 'Место / объект';
@@ -161,7 +216,9 @@ function syncFmt() {
   $('arriveBtn').textContent = remote ? 'Начал(а) работу' : 'Прибыл(а)';
   $('departBtn').textContent = remote ? 'Закончил(а)' : 'Убыл(а)';
 }
-document.querySelectorAll('input[name=fmt]').forEach(r => r.onchange = syncFmt);
+document.querySelectorAll('input[name=fmt]').forEach(r => r.onchange = () => { userEdited = true; syncFmt(); });
+$('place').addEventListener('input', () => { userEdited = true; });
+$('emp').addEventListener('change', () => { userEdited = false; renderPlan(); });
 
 $('pinBtn').onclick = () => { pin = $('pin').value.trim(); start(); };
 $('arriveBtn').onclick = e => act({ action: 'arrive', ...base() }, e.target);
