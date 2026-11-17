@@ -25,6 +25,10 @@
   .list div { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); font-size:15px; }
   .list div:last-child { border-bottom:0; }
   .muted { color:var(--muted); font-size:14px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg input { display:none; }
+  .seg label { flex:1; margin:0; padding:11px 8px; text-align:center; font-size:15px; color:var(--ink); cursor:pointer; background:#fff; }
+  .seg input:checked + label { background:var(--accent); color:#fff; font-weight:600; }
   details summary { cursor:pointer; font-weight:600; }
   .link { background:none; color:var(--accent); width:auto; padding:0; font-weight:500; font-size:14px; }
 </style>
@@ -45,7 +49,13 @@
       <label for="emp">Сотрудник</label>
       <select id="emp"></select>
 
-      <label for="place">Место / объект</label>
+      <label>Формат работы</label>
+      <div class="seg">
+        <input type="radio" name="fmt" id="fmtOn" value="Очно" checked><label for="fmtOn">Очно</label>
+        <input type="radio" name="fmt" id="fmtOff" value="Дистанционно"><label for="fmtOff">Дистанционно</label>
+      </div>
+
+      <label for="place" id="placeLbl">Место / объект</label>
       <input id="place" list="places" placeholder="Выберите или впишите" autocomplete="off">
       <datalist id="places"></datalist>
 
@@ -70,12 +80,12 @@
         </div>
         <div style="height:12px"></div>
         <button class="sec" id="visitBtn">Записать визит</button>
-        <p class="muted">Сотрудник, место и комментарий берутся из полей выше.</p>
+        <p class="muted">Сотрудник, формат, место и комментарий берутся из полей выше.</p>
       </details>
     </div>
 
     <div class="card">
-      <b>Сейчас на объектах</b>
+      <b>Сейчас в работе</b>
       <div class="list" id="onsite"></div>
       <div style="margin-top:8px"><button class="link" id="refresh">Обновить</button></div>
     </div>
@@ -84,7 +94,7 @@
 
 <script>
 // ВСТАВЬТЕ сюда адрес веб-приложения Apps Script (заканчивается на /exec)
-const API = 'PASTE_WEB_APP_URL_HERE';
+const API = 'https://script.google.com/macros/s/AKfycbzp-51TwuOQ9guV90uDErXS_d_nx3ofcDWjdFJoQnTFrWd-W-m8x2eX7v4CyPuyFWkuKg/exec';
 
 const $ = id => document.getElementById(id);
 let pin = localStorage.getItem('st_pin') || '';
@@ -106,7 +116,10 @@ function render(d) {
   if (d.employees.includes(cur)) $('emp').value = cur;
   $('places').innerHTML = d.places.map(p => `<option value="${p.replace(/"/g, '&quot;')}">`).join('');
   $('onsite').innerHTML = d.onSite.length
-    ? d.onSite.map(o => `<div><span>${o.employee}</span><span class="muted">${o.place} · с ${o.since}</span></div>`).join('')
+    ? d.onSite.map(o => {
+        const where = o.format === 'Дистанционно' ? (o.place ? 'дистант, проверяет: ' + o.place : 'дистант') : o.place;
+        return `<div><span>${o.employee}</span><span class="muted" style="text-align:right">${where} · с ${o.since}</span></div>`;
+      }).join('')
     : '<p class="muted">Сейчас никто не отмечен.</p>';
   if (!$('bDate').value) $('bDate').value = d.today;
 }
@@ -138,7 +151,16 @@ async function act(payload, btn) {
   } catch (e) { msg(e.message, false); }
   btn.disabled = false;
 }
-const base = () => ({ employee: $('emp').value, place: $('place').value, note: $('note').value });
+const fmt = () => document.querySelector('input[name=fmt]:checked').value;
+const base = () => ({ employee: $('emp').value, format: fmt(), place: $('place').value, note: $('note').value });
+function syncFmt() {
+  const remote = fmt() === 'Дистанционно';
+  $('placeLbl').textContent = remote ? 'Проверяемое учреждение (если есть)' : 'Место / объект';
+  $('place').placeholder = remote ? 'Оставьте пустым, если просто дистант' : 'Выберите или впишите';
+  $('arriveBtn').textContent = remote ? 'Начал(а) работу' : 'Прибыл(а)';
+  $('departBtn').textContent = remote ? 'Закончил(а)' : 'Убыл(а)';
+}
+document.querySelectorAll('input[name=fmt]').forEach(r => r.onchange = syncFmt);
 
 $('pinBtn').onclick = () => { pin = $('pin').value.trim(); start(); };
 $('arriveBtn').onclick = e => act({ action: 'arrive', ...base() }, e.target);
