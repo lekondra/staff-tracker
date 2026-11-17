@@ -89,12 +89,13 @@
       <div class="list" id="onsite"></div>
       <div style="margin-top:8px"><button class="link" id="refresh">Обновить</button></div>
     </div>
+
   </div>
 </main>
 
 <script>
 // ВСТАВЬТЕ сюда адрес веб-приложения Apps Script (заканчивается на /exec)
-const API = 'https://script.google.com/macros/s/AKfycbzp-51TwuOQ9guV90uDErXS_d_nx3ofcDWjdFJoQnTFrWd-W-m8x2eX7v4CyPuyFWkuKg/exec';
+const API = 'PASTE_WEB_APP_URL_HERE';
 
 const $ = id => document.getElementById(id);
 let pin = localStorage.getItem('st_pin') || '';
@@ -166,6 +167,7 @@ $('pinBtn').onclick = () => { pin = $('pin').value.trim(); start(); };
 $('arriveBtn').onclick = e => act({ action: 'arrive', ...base() }, e.target);
 $('departBtn').onclick = e => act({ action: 'depart', ...base() }, e.target);
 $('visitBtn').onclick = e => act({ action: 'visit', ...base(), date: $('bDate').value, arrive: $('bIn').value, depart: $('bOut').value }, e.target);
+
 $('refresh').onclick = () => start();
 
 if (pin) start(); else $('pinCard').style.display = 'block';

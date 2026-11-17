@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кто где</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --ink:#1d2433; --muted:#6b7385; --line:#dfe3ec; --accent:#2f5bd8; --ok:#1e8e4e; --remote:#2166b0; --gray:#7a8194; --warn:#c2571a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:820px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:0 0 4px; }
+  input[type=date], input[type=password] { width:100%; padding:10px 12px; font:inherit; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:140px; }
+  button { font:inherit; font-weight:600; border:0; border-radius:10px; padding:10px 14px; cursor:pointer; color:#fff; background:var(--accent); }
+  button.ghost { background:#eef1f8; color:var(--ink); font-weight:500; padding:8px 12px; font-size:14px; }
+  .quick { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  details { margin-top:14px; }
+  summary { cursor:pointer; font-weight:600; }
+  .emps { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:4px 12px; margin-top:10px; }
+  .emps label { display:flex; gap:8px; align-items:center; font-size:15px; color:var(--ink); margin:0; padding:5px 0; cursor:pointer; }
+  .tools { display:flex; gap:8px; margin-top:10px; }
+  .person { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+  .head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .name { font-weight:600; }
+  .badge { font-size:13px; padding:3px 10px; border-radius:999px; color:#fff; white-space:nowrap; }
+  .b-on { background:var(--ok); } .b-rem { background:var(--remote); } .b-off { background:var(--gray); } .b-none { background:var(--warn); }
+  .entry { display:flex; gap:10px; padding:6px 0 0; font-size:15px; flex-wrap:wrap; }
+  .entry .d { color:var(--muted); min-width:84px; }
+  .entry .t { min-width:110px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .sum { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .sum span { font-size:14px; padding:4px 10px; border-radius:999px; background:#eef1f8; }
+  #err { color:#8a1c12; margin-top:8px; font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Кто где</h1>
+
+  <div class="card" id="pinCard" style="display:none">
+    <label for="pin">PIN руководителя</label>
+    <input id="pin" type="password" inputmode="numeric">
+    <div style="height:10px"></div>
+    <button id="pinBtn">Войти</button>
+    <div id="err"></div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <div class="row">
+        <div><label for="from">С даты</label><input id="from" type="date"></div>
+        <div><label for="to">По дату</label><input id="to" type="date"></div>
+      </div>
+      <div class="quick">
+        <button class="ghost" id="qToday">Сегодня</button>
+        <button class="ghost" id="qYest">Вчера</button>
+        <button class="ghost" id="qWeek">Последние 7 дней</button>
+        <button class="ghost" id="qRefresh">Обновить</button>
+      </div>
+      <details>
+        <summary id="empSummary">Сотрудники</summary>
+        <div class="tools">
+          <button class="ghost" id="allOn">Выбрать всех</button>
+          <button class="ghost" id="allOff">Снять выбор</button>
+        </div>
+        <div class="emps" id="emps"></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <div class="sum" id="sum"></div>
+      <div id="result"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ВСТАВЬТЕ сюда тот же адрес веб-приложения Apps Script (заканчивается на /exec)
+const API = 'PASTE_WEB_APP_URL_HERE';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let pin = localStorage.getItem('mg_pin') || '';
+let data = null;
+let selected = new Set(JSON.parse(localStorage.getItem('mg_sel') || 'null') || []);
+let firstLoad = !localStorage.getItem('mg_sel');
+
+const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const ru = s => s.split('-').reverse().join('.');
+
+async function fetchReport() {
+  const q = new URLSearchParams({ action: 'report', pin, from: $('from').value, to: $('to').value });
+  const r = await fetch(API + '?' + q);
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error);
+  return j.data;
+}
+
+async function load() {
+  try {
+    data = await fetchReport();
+    localStorage.setItem('mg_pin', pin);
+    $('pinCard').style.display = 'none';
+    $('app').style.display = 'block';
+    if (!$('from').value) { $('from').value = data.from; $('to').value = data.to; }
+    if (firstLoad) { selected = new Set(data.employees); firstLoad = false; saveSel(); }
+    renderEmps();
+    render();
+  } catch (e) {
+    $('app').style.display = 'none';
+    $('pinCard').style.display = 'block';
+    $('err').textContent = pin ? e.message : '';
+    localStorage.removeItem('mg_pin');
+  }
+}
+
+function saveSel() { localStorage.setItem('mg_sel', JSON.stringify([...selected])); }
+
+function renderEmps() {
+  $('emps').innerHTML = data.employees.map(n =>
+    `<label><input type="checkbox" value="${esc(n)}" ${selected.has(n) ? 'checked' : ''}> ${esc(n)}</label>`).join('');
+  $('emps').querySelectorAll('input').forEach(cb => cb.onchange = () => {
+    cb.checked ? selected.add(cb.value) : selected.delete(cb.value);
+    saveSel(); render();
+  });
+}
+
+function badge(last, today) {
+  if (!last) return '<span class="badge b-none">нет отметок</span>';
+  const remote = last.format === 'Дистанционно';
+  if (!last.out && last.date === today) return remote ? '<span class="badge b-rem">дистант</span>' : '<span class="badge b-on">на объекте</span>';
+  return '<span class="badge b-off">' + (remote ? 'закончил(а)' : 'убыл(а)') + '</span>';
+}
+
+function where(e) {
+  if (e.format === 'Дистанционно') return e.place ? 'дистант, проверяет: ' + esc(e.place) : 'дистант';
+  return esc(e.place || '—');
+}
+
+function render() {
+  const emps = data.employees.filter(n => selected.has(n));
+  $('empSummary').textContent = `Сотрудники (выбрано ${emps.length} из ${data.employees.length})`;
+  const multiDay = data.from !== data.to;
+  let nOn = 0, nRem = 0, nNone = 0;
+
+  const html = emps.map(n => {
+    const list = data.rows.filter(r => r.employee === n)
+      .sort((a, b) => (a.date + a.in).localeCompare(b.date + b.in));
+    const last = list[list.length - 1];
+    const open = last && !last.out && last.date === data.today;
+    if (!last) nNone++; else if (open) (last.format === 'Дистанционно' ? nRem++ : nOn++);
+    const entries = list.length ? list.map(e => `
+      <div class="entry">
+        ${multiDay ? `<span class="d">${ru(e.date)}</span>` : ''}
+        <span class="t">${esc(e.in)} – ${esc(e.out || '…')}${e.dur ? ' (' + esc(e.dur) + ')' : ''}</span>
+        <span>${where(e)}${e.note ? ' <span class="muted">· ' + esc(e.note) + '</span>' : ''}</span>
+      </div>`).join('') : '<div class="muted" style="padding-top:6px">За выбранный период отметок нет</div>';
+    return `<div class="person"><div class="head"><span class="name">${esc(n)}</span>${badge(last, data.today)}</div>${entries}</div>`;
+  }).join('');
+
+  $('sum').innerHTML =
+    `<span>${ru(data.from)}${multiDay ? ' – ' + ru(data.to) : ''}</span>` +
+    `<span>на объекте сейчас: ${nOn}</span><span>дистант сейчас: ${nRem}</span><span>без отметок: ${nNone}</span>`;
+  $('result').innerHTML = html || '<p class="muted">Выберите сотрудников.</p>';
+}
+
+function setRange(a, b) { $('from').value = iso(a); $('to').value = iso(b); load(); }
+$('pinBtn').onclick = () => { pin = $('pin').value.trim(); load(); };
+$('qToday').onclick = () => { const d = new Date(); setRange(d, d); };
+$('qYest').onclick = () => { const d = new Date(); d.setDate(d.getDate() - 1); setRange(d, d); };
+$('qWeek').onclick = () => { const d = new Date(), a = new Date(); a.setDate(a.getDate() - 6); setRange(a, d); };
+$('qRefresh').onclick = () => load();
+$('from').onchange = $('to').onchange = () => load();
+$('allOn').onclick = () => { selected = new Set(data.employees); saveSel(); renderEmps(); render(); };
+$('allOff').onclick = () => { selected.clear(); saveSel(); renderEmps(); render(); };
+
+if (pin) load(); else $('pinCard').style.display = 'block';
+</script>
+</body>
+</html>
